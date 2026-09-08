@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>U-MART — Firebase Connected</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f5f5f5;margin:0;color:#222}header{background:#0b7a3b;color:#fff;padding:16px;text-align:center;font-size:22px;font-weight:bold}nav{display:flex;gap:6px;padding:10px;background:#fff;position:sticky;top:0;z-index:2}button{border:0;border-radius:8px;padding:10px 13px;background:#0b7a3b;color:#fff;font-weight:bold}nav button{flex:1;font-size:13px}main{max-width:900px;margin:auto;padding:15px}.card{background:#fff;border-radius:14px;padding:15px;margin:10px 0;box-shadow:0 2px 8px #ddd}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}input,select,textarea{width:100%;box-sizing:border-box;padding:11px;margin:6px 0;border:1px solid #ccc;border-radius:8px}.price{font-weight:bold;color:#0b7a3b}.small{font-size:13px;color:#666}.badge{display:inline-block;padding:5px 8px;border-radius:20px;background:#e8f5e9;color:#0b7a3b;font-size:12px}.hidden{display:none}.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.danger{background:#b3261e}.notice{padding:10px;border-radius:8px;background:#fff3cd}.success{padding:10px;border-radius:8px;background:#e8f5e9}.status{margin-top:8px}
+</style>
+</head>
+<body>
+<header>🛒 U-MART — Firebase Connected</header>
+<nav>
+<button onclick="show('shop')">Customer</button>
+<button id="adminTab" class="hidden" onclick="show('admin')">Admin</button>
+<button id="deliveryTab" class="hidden" onclick="show('delivery')">Delivery</button>
+</nav>
+<main>
+<section id="auth" class="card">
+<h3>🔐 U-MART Login</h3>
+<p class="small">Firebase Authentication से सुरक्षित login.</p>
+<input id="loginName" placeholder="नाम">
+<input id="loginEmail" type="email" placeholder="Email">
+<input id="loginPassword" type="password" placeholder="Password (कम से कम 6 characters)">
+<div class="row"><button onclick="signUp()">नया Account</button><button onclick="signIn()">Login</button></div>
+<button class="danger" onclick="signOutUser()">Logout</button>
+<div id="authMsg" class="small"></div>
+</section>
+
+<section id="shop">
+<div class="card"><h2>ऑनलाइन किराना ऑर्डर</h2><p class="small">Minimum ₹500 • ₹500–₹999 delivery ₹30 • ₹1000+ FREE</p><div id="userInfo" class="small"></div></div>
+<div id="products" class="grid"></div>
+<div class="card"><h3>🛒 Cart</h3><div id="cart"></div><div id="total"></div>
+<input id="name" placeholder="नाम"><input id="phone" placeholder="मोबाइल नंबर"><textarea id="address" placeholder="डिलीवरी पता"></textarea>
+<select id="payment"><option>COD</option><option>UPI Demo</option></select>
+<button onclick="placeOrder()">ऑर्डर करें</button></div>
+<div class="card"><h3>📦 मेरे Orders</h3><div id="myOrders">Login के बाद orders दिखेंगे।</div></div>
+</section>
+
+<section id="admin" class="hidden"><div class="card"><h2>📊 Admin Panel</h2><p class="small">Firestore से real-time orders.</p></div><div id="adminOrders"></div></section>
+<section id="delivery" class="hidden"><div class="card"><h2>🚴 Delivery Panel</h2><div id="deliveryOrders"></div></div></section>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig={
+ apiKey:"AIzaSyCVKq0InCu_4A2XvrvFi1uyDApRbw7p_GE",
+ authDomain:"u-mart-b53f4.firebaseapp.com",
+ projectId:"u-mart-b53f4",
+ storageBucket:"u-mart-b53f4.firebasestorage.app",
+ messagingSenderId:"721750697455",
+ appId:"1:721750697455:web:3ca039cc6338b50ed02c21a"
+};
+firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth();
+const db=firebase.firestore();
+
+const products=[
+ ['Basmati Chawal','₹100/kg',100],['Toor Dal','₹120/kg',120],['Moong Dal','₹100/kg',100],
+ ['Moong Mogar','₹110/kg',110],['Ashirwad Atta 5kg','₹250',250],['Chana Dal','₹90/kg',90],
+ ['Soya Badi','₹110/kg',110],['Kaju','₹920/kg',920],['Sabudana Sachamoti','₹90/kg',90]
+];
+let cart=[]; let currentRole='customer'; let unsubscribeMyOrders=null; let unsubscribeAllOrders=null;
+
+function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function show(id){['shop','admin','delivery'].forEach(x=>document.getElementById(x).classList.toggle('hidden',x!==id)); if(id==='admin')startAllOrders(); if(id==='delivery')startAllOrders();}
+function renderProducts(){document.getElementById('products').innerHTML=products.map((p,i)=>`<div class="card"><b>${esc(p[0])}</b><p class="price">${p[1]}</p><button onclick="add(${i})">+ Cart</button></div>`).join('');}
+function add(i){cart.push(i);renderCart();}
+function renderCart(){let counts={};cart.forEach(i=>counts[i]=(counts[i]||0)+1);let subtotal=Object.entries(counts).reduce((s,[i,q])=>s+products[i][2]*q,0);document.getElementById('cart').innerHTML=Object.entries(counts).map(([i,q])=>`<div class="row"><span>${esc(products[i][0])} × ${q}</span><span>₹${products[i][2]*q}</span></div>`).join('')||'<p>Cart खाली है</p>';let delivery=subtotal>=1000?0:subtotal>=500?30:0;document.getElementById('total').innerHTML=`<hr><b>Subtotal: ₹${subtotal}</b><br>Delivery: ₹${delivery}<br><b>Total: ₹${subtotal+delivery}</b>${subtotal<500?'<p class="small">₹500 minimum order पूरा करें।</p>':''}`;}
+
+async function signUp(){const name=document.getElementById('loginName').value.trim(),email=document.getElementById('loginEmail').value.trim(),password=document.getElementById('loginPassword').value;if(!name||!email||password.length<6)return msg('नाम, email और 6+ character password भरें।',true);try{const cred=await auth.createUserWithEmailAndPassword(email,password);await cred.user.updateProfile({displayName:name});await db.collection('users').doc(cred.user.uid).set({name,email,role:'customer',createdAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});msg('Account बन गया।',false);}catch(e){msg(e.message,true)}}
+async function signIn(){const email=document.getElementById('loginEmail').value.trim(),password=document.getElementById('loginPassword').value;try{await auth.signInWithEmailAndPassword(email,password);msg('Login सफल।',false)}catch(e){msg(e.message,true)}}
+async function signOutUser(){await auth.signOut();}
+function msg(t,error){const el=document.getElementById('authMsg');el.textContent=t;el.style.color=error?'#b3261e':'#0b7a3b';}
+
+async function loadRole(user){if(!user)return;const snap=await db.collection('users').doc(user.uid).get();currentRole=snap.exists?(snap.data().role||'customer'):'customer';document.getElementById('adminTab').classList.toggle('hidden',currentRole!=='admin');document.getElementById('deliveryTab').classList.toggle('hidden',!['admin','delivery'].includes(currentRole));document.getElementById('userInfo').textContent=`Logged in: ${user.displayName||user.email} • Role: ${currentRole}`;startMyOrders(user);}
+async function placeOrder(){const user=auth.currentUser;if(!user)return alert('पहले Login करें।');let counts={};cart.forEach(i=>counts[i]=(counts[i]||0)+1);let subtotal=Object.entries(counts).reduce((s,[i,q])=>s+products[i][2]*q,0);if(subtotal<500)return alert('Minimum order ₹500 है।');const order={customerId:user.uid,name:document.getElementById('name').value.trim()||user.displayName||'',phone:document.getElementById('phone').value.trim(),address:document.getElementById('address').value.trim(),payment:document.getElementById('payment').value,items:counts,subtotal,status:'Order Received',createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};try{const ref=await db.collection('orders').add(order);cart=[];renderCart();alert('ऑर्डर सफल! Order ID: '+ref.id);show('shop');}catch(e){alert('Order error: '+e.message)}}
+function statusNext(id,current){const a=['Order Received','Packing','Ready','Out for Delivery','Delivered'],next=a[Math.min(a.indexOf(current)+1,a.length-1)];db.collection('orders').doc(id).update({status:next,updatedAt:firebase.firestore.FieldValue.serverTimestamp()}).catch(e=>alert(e.message));}
+function orderHtml(o,admin){const total=o.subtotal>=1000?o.subtotal:o.subtotal+30;return `<div class="card"><div class="row"><b>${esc(o.id)}</b><span class="badge">${esc(o.status)}</span></div><p>${esc(o.name||'Customer')} • ${esc(o.phone||'')}<br>${esc(o.address||'')}</p><p>₹${total} • ${esc(o.payment||'')}</p>${admin&&o.status!=='Delivered'?`<button onclick="statusNext('${o.id}','${esc(o.status)}')">Next Status</button>`:''}</div>`;}
+function startMyOrders(user){if(unsubscribeMyOrders)unsubscribeMyOrders();unsubscribeMyOrders=db.collection('orders').where('customerId','==',user.uid).onSnapshot(s=>{const arr=[];s.forEach(d=>arr.push({id:d.id,...d.data()}));arr.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));document.getElementById('myOrders').innerHTML=arr.length?arr.map(o=>orderHtml(o,false)).join(''):'अभी कोई order नहीं।';},e=>document.getElementById('myOrders').textContent='Orders load error: '+e.message);}
+function startAllOrders(){if(!['admin','delivery'].includes(currentRole))return;if(unsubscribeAllOrders)unsubscribeAllOrders();unsubscribeAllOrders=db.collection('orders').onSnapshot(s=>{const arr=[];s.forEach(d=>arr.push({id:d.id,...d.data()}));arr.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));const html=arr.length?arr.map(o=>orderHtml(o,true)).join(''):'कोई order नहीं।';document.getElementById('adminOrders').innerHTML=currentRole==='admin'?html:'';document.getElementById('deliveryOrders').innerHTML=currentRole==='delivery'||currentRole==='admin'?html:'';},e=>{document.getElementById('adminOrders').textContent='Orders load error: '+e.message;document.getElementById('deliveryOrders').textContent='Orders load error: '+e.message;});}
+
+auth.onAuthStateChanged(async user=>{document.getElementById('auth').classList.toggle('hidden',!!user);if(user){await loadRole(user);}else{currentRole='customer';document.getElementById('adminTab').classList.add('hidden');document.getElementById('deliveryTab').classList.add('hidden');document.getElementById('userInfo').textContent='Login required';document.getElementById('myOrders').textContent='Login के बाद orders दिखेंगे।';if(unsubscribeMyOrders)unsubscribeMyOrders();if(unsubscribeAllOrders)unsubscribeAllOrders();show('shop');}});
+renderProducts();renderCart();
+</script>
+</body>
+</html>
